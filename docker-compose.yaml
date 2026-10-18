@@ -1,0 +1,75 @@
+# Набор контейнеров, которые запускаются вместе командой docker compose up.
+name: go-users-api
+services:
+  # ---- Наш Go-сервис ----
+  app:
+    # Не брать готовый образ, а собрать его из Dockerfile в текущей папке.
+    build: .
+    # Проброс порта "хост:контейнер": localhost:8080 на Mac ведёт в контейнер на :8080.
+    # Порт справа должен совпадать с HTTP_ADDR из .env.
+    ports:
+      - "8080:8080"
+    # Запускать app только после того, как postgres прошёл healthcheck,
+    # то есть реально готов принимать подключения, а не просто стартовал.
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Все строки КЛЮЧ=значение из .env становятся переменными окружения
+    # контейнера. Отсюда os.Getenv берёт DATABASE_URL и HTTP_ADDR.
+    env_file: .env
+
+  # ---- База данных ----
+  postgres:
+    # Готовый официальный образ, свой Dockerfile не нужен.
+    image: postgres:15
+    # Образ при первом старте читает POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
+    # и по ним создаёт пользователя и базу.
+    env_file: .env
+    # Доступ к базе с Mac (GoLand, psql) по localhost:5432.
+    # Другие контейнеры ходят сюда по имени сервиса: postgres:5432.
+    ports:
+      - "5432:5432"
+    # Bind mount: папка ./tmp/pgdata на диске подключается как папка данных Postgres.
+    # Данные переживают пересоздание контейнера. Удалить папку = сбросить базу.
+    volumes:
+      - ./tmp/pgdata:/var/lib/postgresql/data
+    # Как Docker проверяет, что база готова к работе.
+    healthcheck:
+      # pg_isready отвечает кодом 0, если Postgres принимает подключения.
+      # $$ экранирует $, чтобы переменную подставил shell внутри контейнера,
+      # а не Compose при чтении файла.
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      # Пауза между проверками.
+      interval: 3s
+      # Сколько ждать ответа одной проверки, потом считать её проваленной.
+      timeout: 2s
+      # Сколько провалов подряд, чтобы контейнер стал unhealthy (~30 секунд).
+      retries: 10
+
+  # ---- Веб-интерфейс для базы ----
+  pgadmin:
+    image: dpage/pgadmin4
+    # Открывается в браузере на http://localhost:5050 (внутри контейнера порт 80).
+    # При добавлении сервера в pgAdmin в поле Host писать postgres, а не localhost.
+    ports:
+      - "5050:80"
+    # Named volume: хранилищем управляет Docker. Здесь pgAdmin сохраняет
+    # настройки и добавленные серверы, чтобы они не пропадали.
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+    # Переменные окружения прямо в compose, без .env (только для локальной разработки).
+    environment:
+      # Обязательные для pgAdmin логин и пароль администратора.
+      PGADMIN_DEFAULT_EMAIL: demo@example.com
+      PGADMIN_DEFAULT_PASSWORD: secret
+
+      # Desktop-режим: не спрашивать логин при входе.
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+
+      # Не требовать мастер-пароль для сохранённых подключений.
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'False'
+
+# Объявление named volumes, которые используются в сервисах выше.
+# Docker создаст их сам при первом запуске.
+volumes:
+  pgadmin-data:
