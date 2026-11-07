@@ -1,5 +1,6 @@
 // Точка входа сервиса. Здесь нет бизнес-логики: main только собирает части
-// (конфиг, логгер, база, миграции, сервер), запускает их и аккуратно останавливает.
+// (конфиг, логгер, база, миграции, слои сервиса, роутер, сервер), запускает их и
+// аккуратно останавливает.
 // Аналог в Laravel: public/index.php + bootstrap/app.php.
 package main
 
@@ -14,8 +15,12 @@ import (
 	"time"
 
 	"github.com/MartinAkopyan/go-users-api/internal/config"
+	"github.com/MartinAkopyan/go-users-api/internal/repository/postgres"
+	"github.com/MartinAkopyan/go-users-api/internal/service"
+	httptransport "github.com/MartinAkopyan/go-users-api/internal/transport/http"
 	"github.com/MartinAkopyan/go-users-api/migrations"
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
@@ -119,10 +124,24 @@ func run() error {
 		logger.Info("migration applied", "version", res.Source.Version, "duration", res.Duration)
 	}
 
-	// ---- Шаг 5: роутер и HTTP-сервер ----
+	// ---- Шаг 5: зависимости ----
+	// Собираем слои снизу вверх: каждому нужен уже созданный нижний.
+	// Пул уходит только в репозиторий, сервис получает репозиторий (как интерфейс),
+	// хендлер получает сервис. Аналог bind() в AppServiceProvider, только руками.
+	repo := postgres.NewUserRepo(pool)
+	svc := service.NewUserService(repo)
+	h := httptransport.NewHandler(svc, logger)
+
+	// ---- Шаг 6: роутер и HTTP-сервер ----
 	// Роутер сопоставляет метод + путь с хендлером (как routes/api.php в Laravel).
-	// Маршрутов пока нет, поэтому на любой запрос ответ 404.
 	r := chi.NewRouter()
+	// Middleware оборачивают все маршруты и подключаются строго до них, иначе chi
+	// упадёт с паникой при старте. RequestID даёт каждому запросу id для логов,
+	// Recoverer превращает панику в хендлере в ответ 500 вместо обрыва соединения.
+	r.Use(middleware.RequestID)
+	r.Use(middleware.Recoverer)
+	// h.CreateUser без скобок: передаём сам метод, chi вызовет его на каждый запрос.
+	r.Post("/users", h.CreateUser)
 
 	// & берёт адрес структуры: srv это указатель *http.Server. Методы сервера
 	// (ListenAndServe, Shutdown) работают с одним и тем же объектом.
@@ -138,7 +157,7 @@ func run() error {
 
 	logger.Info("starting server", "addr", cfg.HTTPAddr)
 
-	// ---- Шаг 6: запуск сервера ----
+	// ---- Шаг 7: запуск сервера ----
 	// Канал для ошибки сервера. Горутина не может вернуть значение в run через
 	// return, поэтому передаёт ошибку через канал. Буфер 1: горутина положит
 	// ошибку и завершится, даже если её уже никто не читает.
@@ -154,7 +173,7 @@ func run() error {
 		errChan <- err
 	}()
 
-	// ---- Шаг 7: ожидание и остановка ----
+	// ---- Шаг 8: ожидание и остановка ----
 	// select ждёт, какой из каналов отдаст значение первым (как switch для каналов).
 	select {
 	case err := <-errChan:
