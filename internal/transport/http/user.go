@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/go-playground/validator/v10"
 )
@@ -13,10 +14,12 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	err := json.NewDecoder(r.Body).Decode(&req)
 
 	if err != nil {
+		h.logger.Warn("decode failed", "error", err)
 		writeError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
 
+	req.Email = strings.TrimSpace(req.Email)
 	err = h.validate.Struct(req)
 
 	if err != nil {
