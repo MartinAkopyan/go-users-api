@@ -29,3 +29,21 @@ func (repo *UserRepo) Create(ctx context.Context, u domain.User) (domain.User, e
 
 	return u, nil
 }
+
+func (repo *UserRepo) GetByID(ctx context.Context, id int64) (domain.User, error) {
+	var u domain.User
+
+	err := repo.pool.QueryRow(ctx, `
+		select u.id, u.full_name, u.email, u.password_hash,
+		r.name, u.created_at, u.updated_at
+		from users u
+		join roles r on u.role_id = r.id
+		where u.id = $1`, id,
+	).Scan(&u.ID, &u.FullName, &u.Email, &u.PasswordHash, &u.Role, &u.CreatedAt, &u.UpdatedAt)
+
+	if err != nil {
+		return domain.User{}, mapDBError(err)
+	}
+
+	return u, nil
+}
