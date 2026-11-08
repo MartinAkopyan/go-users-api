@@ -24,6 +24,16 @@ func (r *fakeUserRepo) Create(ctx context.Context, u domain.User) (domain.User, 
 	return u, nil
 }
 
+func (r *fakeUserRepo) GetByID(ctx context.Context, id int64) (domain.User, error) {
+	for _, u := range r.users {
+		if u.ID == id {
+			return u, nil
+		}
+	}
+
+	return domain.User{}, domain.ErrNotFound
+}
+
 func TestRegister_Success(t *testing.T) {
 	repo := &fakeUserRepo{users: make(map[string]domain.User)}
 	srv := NewUserService(repo)

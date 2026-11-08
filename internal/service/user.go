@@ -17,6 +17,7 @@ import (
 // подставляется fake без базы. Новые методы добавляются по мере надобности.
 type UserRepository interface {
 	Create(ctx context.Context, u domain.User) (domain.User, error)
+	GetByID(ctx context.Context, id int64) (domain.User, error)
 }
 
 // UserService держит зависимости. Поле типа интерфейса: сервису всё равно,
@@ -52,6 +53,16 @@ func (s *UserService) Register(ctx context.Context, fullName, email, password st
 		// распознает её через errors.Is и ответит 409. С %v или errors.New
 		// ошибка потерялась бы, и вышло бы 500.
 		return domain.User{}, fmt.Errorf("creating user: %w", err)
+	}
+
+	return usr, nil
+}
+
+func (s *UserService) GetByID(ctx context.Context, id int64) (domain.User, error) {
+	usr, err := s.repo.GetByID(ctx, id)
+
+	if err != nil {
+		return domain.User{}, fmt.Errorf("getting user: %w", err)
 	}
 
 	return usr, nil
