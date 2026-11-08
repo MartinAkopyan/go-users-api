@@ -21,6 +21,8 @@ func writeError(w http.ResponseWriter, status int, message string) {
 func (h *Handler) handleServiceError(w http.ResponseWriter, err error) {
 	if errors.Is(err, domain.ErrAlreadyExists) {
 		writeError(w, http.StatusConflict, "user already exists")
+	} else if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "user not found")
 	} else {
 		h.logger.Error("service error", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal server error")
