@@ -19,8 +19,6 @@ import (
 	"github.com/MartinAkopyan/go-users-api/internal/service"
 	httptransport "github.com/MartinAkopyan/go-users-api/internal/transport/http"
 	"github.com/MartinAkopyan/go-users-api/migrations"
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
@@ -133,15 +131,10 @@ func run() error {
 	h := httptransport.NewHandler(svc, logger)
 
 	// ---- Шаг 6: роутер и HTTP-сервер ----
-	// Роутер сопоставляет метод + путь с хендлером (как routes/api.php в Laravel).
-	r := chi.NewRouter()
-	// Middleware оборачивают все маршруты и подключаются строго до них, иначе chi
-	// упадёт с паникой при старте. RequestID даёт каждому запросу id для логов,
-	// Recoverer превращает панику в хендлере в ответ 500 вместо обрыва соединения.
-	r.Use(middleware.RequestID)
-	r.Use(middleware.Recoverer)
-	// h.CreateUser без скобок: передаём сам метод, chi вызовет его на каждый запрос.
-	r.Post("/users", h.CreateUser)
+	// Маршруты и middleware описаны в internal/transport/http/router.go (как
+	// routes/api.php в Laravel). Тот же NewRouter собирают и тесты хендлеров,
+	// поэтому сервер и тесты всегда работают с одинаковым набором маршрутов.
+	r := httptransport.NewRouter(h)
 
 	// & берёт адрес структуры: srv это указатель *http.Server. Методы сервера
 	// (ListenAndServe, Shutdown) работают с одним и тем же объектом.
