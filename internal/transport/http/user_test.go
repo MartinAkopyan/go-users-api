@@ -18,7 +18,15 @@ type fakeUserRepo struct {
 }
 
 func (f *fakeUserRepo) Create(ctx context.Context, user domain.User) (domain.User, error) {
-	return domain.User{}, nil
+	for _, fu := range f.users {
+		if fu.Email == user.Email {
+			return domain.User{}, domain.ErrAlreadyExists
+		}
+	}
+
+	user.ID = int64(len(f.users)) + 1
+	f.users[user.ID] = user
+	return user, nil
 }
 
 func (f *fakeUserRepo) GetByID(ctx context.Context, id int64) (domain.User, error) {
@@ -83,6 +91,94 @@ func TestGetUser_InvalidID(t *testing.T) {
 	repo := &fakeUserRepo{users: map[int64]domain.User{}}
 	router := newTestRouter(repo)
 	req := httptest.NewRequest(http.MethodGet, "/users/abc", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestCreateUser_Success(t *testing.T) {
+	repo := &fakeUserRepo{users: map[int64]domain.User{}}
+	router := newTestRouter(repo)
+	body := "{\"full_name\":\"Ann\", \"email\": \" Ann@mail.com \", \"password\":\"secret123\"}"
+	req := httptest.NewRequest(http.MethodPost, "/users", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	var resp userResponse
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("got %d, want %d", rec.Code, http.StatusCreated)
+	}
+
+	if strings.Contains(rec.Body.String(), "password") {
+		t.Errorf("response contains password hash: %s", rec.Body.String())
+	}
+
+	err := json.NewDecoder(rec.Body).Decode(&resp)
+
+	if err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if resp.Email != "ann@mail.com" {
+		t.Errorf("got %s, want %s", resp.Email, "ann@mail.com")
+	}
+}
+
+func TestCreateUser_Duplicate(t *testing.T) {
+	repo := &fakeUserRepo{users: map[int64]domain.User{
+		1: {ID: 1, FullName: "Ann", Email: "ann@mail.com", PasswordHash: "secret123"},
+	}}
+	router := newTestRouter(repo)
+	body := "{\"full_name\":\"Ann\", \"email\": \" Ann@mail.com \", \"password\":\"secret123\"}"
+	req := httptest.NewRequest(http.MethodPost, "/users", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("got %d, want %d", rec.Code, http.StatusConflict)
+	}
+}
+
+func TestCreateUser_ValidationFailed(t *testing.T) {
+	repo := &fakeUserRepo{users: map[int64]domain.User{}}
+	router := newTestRouter(repo)
+	body := "{\"full_name\":\"\", \"email\": \" Annmail.com \", \"password\":\"123\"}"
+	req := httptest.NewRequest(http.MethodPost, "/users", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	var resp struct {
+		Fields map[string]string `json:"fields"`
+	}
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+
+	err := json.NewDecoder(rec.Body).Decode(&resp)
+
+	if err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	for _, name := range []string{"full_name", "email", "password"} {
+		if _, ok := resp.Fields[name]; !ok {
+			t.Errorf("fields has no %q: %v", name, resp.Fields)
+		}
+	}
+}
+
+func TestCreateUser_InvalidJSON(t *testing.T) {
+	repo := &fakeUserRepo{users: map[int64]domain.User{}}
+	router := newTestRouter(repo)
+	req := httptest.NewRequest(http.MethodPost, "/users", strings.NewReader("ffa"))
 	rec := httptest.NewRecorder()
 
 	router.ServeHTTP(rec, req)
